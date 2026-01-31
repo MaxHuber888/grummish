@@ -38,13 +38,15 @@ function Options:load()
     if not _G.GameOptions then
         _G.GameOptions = {
             useCriticals = true, -- Default: play with criticals (holy cards)
-            useSchleck = true -- Default: play with schleck (cutting)
+            useSchleck = true, -- Default: play with schleck (cutting)
+            useBlind = false, -- Default: normal trump selection (not blind)
+            debugMode = false -- Default: no debug mode (hide opponent info)
         }
     end
 
     -- Create checkboxes
     local centerX = 800
-    local startY = 320
+    local startY = 260
 
     self.criticalsCheckbox = Checkbox.new(
         centerX - 200, startY,
@@ -58,17 +60,31 @@ function Options:load()
         _G.GameOptions.useSchleck
     )
 
-    self.checkboxes = {self.criticalsCheckbox, self.schleckCheckbox}
+    self.blindCheckbox = Checkbox.new(
+        centerX - 200, startY + 100,
+        "Blind Watten (Random trump, teammates must guess)",
+        _G.GameOptions.useBlind
+    )
+
+    self.debugCheckbox = Checkbox.new(
+        centerX - 200, startY + 150,
+        "Debug Mode (Show all hands and events)",
+        _G.GameOptions.debugMode
+    )
+
+    self.checkboxes = {self.criticalsCheckbox, self.schleckCheckbox, self.blindCheckbox, self.debugCheckbox}
 
     -- Create play button
     self.playButton = Button.new(
-        centerX - 150, startY + 170,
+        centerX - 150, startY + 270,
         300, 60,
         "Play Game",
         function()
             -- Save options
             _G.GameOptions.useCriticals = self.criticalsCheckbox.checked
             _G.GameOptions.useSchleck = self.schleckCheckbox.checked
+            _G.GameOptions.useBlind = self.blindCheckbox.checked
+            _G.GameOptions.debugMode = self.debugCheckbox.checked
             -- Start game
             GameState:switch("game")
         end
@@ -76,7 +92,7 @@ function Options:load()
 
     -- Create back button
     self.backButton = Button.new(
-        centerX - 150, startY + 250,
+        centerX - 150, startY + 350,
         300, 60,
         "Back to Menu",
         function() GameState:switch("menu") end
@@ -92,6 +108,12 @@ function Options:enter()
     end
     if self.schleckCheckbox then
         self.schleckCheckbox.checked = _G.GameOptions.useSchleck
+    end
+    if self.blindCheckbox then
+        self.blindCheckbox.checked = _G.GameOptions.useBlind
+    end
+    if self.debugCheckbox then
+        self.debugCheckbox.checked = _G.GameOptions.debugMode
     end
 end
 

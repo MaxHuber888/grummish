@@ -173,7 +173,12 @@ function Game:startNewHand()
     else
         -- Skip cutting and deal immediately
         self.hands = self.deck:deal(4, 5)
-        self.phase = "selecting_rank"
+        -- Check if blind mode is enabled
+        if _G.GameOptions and _G.GameOptions.useBlind then
+            self.phase = "blind_reveal"
+        else
+            self.phase = "selecting_rank"
+        end
     end
 
     -- Timers
@@ -185,6 +190,10 @@ function Game:startNewHand()
     self.mouseX = 0
     self.mouseY = 0
     self.selectionButtons = {}
+
+    -- Blind Watten state
+    self.blindRevealCards = nil
+    self.trumpKnowers = {}
 
     -- Trigger AI actions if needed
     if self.phase == "cutting" and self.cutter ~= 1 then
@@ -229,6 +238,16 @@ function Game:update(dt)
                 self:performCut()
                 self.aiTimer = 0
             end
+        end
+    elseif self.phase == "blind_reveal" then
+        -- Perform blind reveal immediately when entering phase
+        if not self.blindRevealCards then
+            self:performBlindReveal()
+        end
+        -- Wait for display timer
+        if self.phaseTimer >= 1.5 then
+            self.phase = "playing"
+            self.phaseTimer = 0
         end
     elseif self.phase == "selecting_rank" then
         if self.rankSelector ~= 1 then
@@ -335,13 +354,46 @@ function Game:finishCutting()
     self.cutResult = nil
     self.cutResultTimer = 0
 
-    -- Move to rank selection phase
-    self.phase = "selecting_rank"
-
-    -- Trigger AI trump selection if needed
-    if self.rankSelector ~= 1 then
-        self.aiTimer = self.aiDelay
+    -- Check if blind mode is enabled
+    if _G.GameOptions and _G.GameOptions.useBlind then
+        self.phase = "blind_reveal"
+        self.phaseTimer = 0
+    else
+        -- Move to rank selection phase
+        self.phase = "selecting_rank"
+        -- Trigger AI trump selection if needed
+        if self.rankSelector ~= 1 then
+            self.aiTimer = self.aiDelay
+        end
     end
+end
+
+-- Blind Watten Logic
+function Game:performBlindReveal()
+    -- Get the last dealt card from cutter and dealer
+    -- Note: Last dealt card is at the end of their hand
+    local cutterCard = self.hands[self.cutter][#self.hands[self.cutter]]
+    local dealerCard = self.hands[self.dealer][#self.hands[self.dealer]]
+
+    -- Set trump based on revealed cards
+    -- Cutter's card = trump rank, Dealer's card = trump suit
+    self.trumpRank = cutterCard.rank
+    self.trumpSuit = dealerCard.suit
+
+    -- Store revealed cards for display
+    self.blindRevealCards = {
+        cutter = cutterCard,
+        dealer = dealerCard
+    }
+
+    -- Mark who knows the trump (cutter and dealer)
+    self.trumpKnowers = {
+        [self.cutter] = true,
+        [self.dealer] = true
+    }
+
+    -- Play reveal sound
+    Assets.playSound("snd_card_flip_1", 0.5)
 end
 
 -- Trump Selection Logic
@@ -573,7 +625,17 @@ function Game:isCardPlayValid(card, player)
         return true
     end
 
-    -- First card IS trump suit - must follow suit or beat it
+    -- First card IS trump suit
+    -- In Blind Watten, only cutter and dealer must follow trump suit
+    -- (teammates don't officially know the trump)
+    if _G.GameOptions and _G.GameOptions.useBlind then
+        local isKnower = (player == self.cutter or player == self.dealer)
+        if not isKnower then
+            return true -- Teammates can play any card
+        end
+    end
+
+    -- Must follow suit or beat it (normal mode, or cutter/dealer in blind mode)
     local hand = self.hands[player]
 
     -- Check if this card is the highest card in the game (trump rank + trump suit)
@@ -922,10 +984,12 @@ function Game:draw()
 
     -- Draw players (adjusted positions and sizes) - skip during cutting phase
     if self.phase ~= "cutting" then
+        -- In debug mode, show all hands face-up
+        local debugMode = _G.GameOptions and _G.GameOptions.debugMode
         self:drawPlayer(1, 800, 750, "You", true, 0)          -- Bottom (human) - moved further down to prevent overlap
-        self:drawPlayer(2, 140, 450, "Left", false, math.pi/2) -- Left - rotated 90°, moved in
-        self:drawPlayer(3, 800, 60, "Top", false, 0)          -- Top - moved further up to prevent overlap
-        self:drawPlayer(4, 1460, 450, "Right", false, -math.pi/2) -- Right - rotated -90°, moved in
+        self:drawPlayer(2, 140, 450, "Left", debugMode, math.pi/2) -- Left - rotated 90°, moved in
+        self:drawPlayer(3, 800, 60, "Top", debugMode, 0)          -- Top - moved further up to prevent overlap
+        self:drawPlayer(4, 1460, 450, "Right", debugMode, -math.pi/2) -- Right - rotated -90°, moved in
     end
 
     -- Draw played cards
@@ -949,9 +1013,16 @@ function Game:draw()
     -- Draw HUD
     self:drawHUD()
 
+    -- Draw blind trump cards in bottom right (if player knows)
+    if _G.GameOptions and _G.GameOptions.useBlind and self.blindRevealCards then
+        self:drawBlindTrumpCards()
+    end
+
     -- Draw phase-specific UI
     if self.phase == "cutting" then
         self:drawCutting()
+    elseif self.phase == "blind_reveal" then
+        self:drawBlindReveal()
     elseif self.phase == "selecting_rank" and self.rankSelector == 1 then
         self:drawRankSelection()
     elseif self.phase == "selecting_suit" and self.suitSelector == 1 then
@@ -1140,15 +1211,27 @@ function Game:drawHUD()
     love.graphics.print("You: " .. self.gameScore[1] .. " score | " .. self.tricksWon[1] .. " tricks", 10, 10)
     love.graphics.print("Opponents: " .. self.gameScore[2] .. " score | " .. self.tricksWon[2] .. " tricks", 10, 40)
 
-    -- Trump info
-    if self.trumpRank and self.trumpSuit then
-        love.graphics.setColor(1, 1, 0, 1)
-        love.graphics.setNewFont(24)
-        love.graphics.print("Trump: " .. RANK_NAMES[self.trumpRank] .. " of " .. SUIT_NAMES[self.trumpSuit], 400, 15)
-    elseif self.trumpRank then
-        love.graphics.setColor(1, 1, 0, 1)
-        love.graphics.setNewFont(24)
-        love.graphics.print("Trump Rank: " .. RANK_NAMES[self.trumpRank], 400, 15)
+    -- Trump info (hide if player doesn't know in blind mode, unless debug mode)
+    local showTrump = true
+    if _G.GameOptions and _G.GameOptions.useBlind and self.trumpKnowers then
+        -- Show if player knows OR debug mode is on
+        if _G.GameOptions.debugMode then
+            showTrump = true
+        else
+            showTrump = self.trumpKnowers[1] == true
+        end
+    end
+
+    if showTrump then
+        if self.trumpRank and self.trumpSuit then
+            love.graphics.setColor(1, 1, 0, 1)
+            love.graphics.setNewFont(24)
+            love.graphics.print("Trump: " .. RANK_NAMES[self.trumpRank] .. " of " .. SUIT_NAMES[self.trumpSuit], 400, 15)
+        elseif self.trumpRank then
+            love.graphics.setColor(1, 1, 0, 1)
+            love.graphics.setNewFont(24)
+            love.graphics.print("Trump Rank: " .. RANK_NAMES[self.trumpRank], 400, 15)
+        end
     end
 
     -- Current turn
@@ -1156,6 +1239,117 @@ function Game:drawHUD()
         love.graphics.setColor(0.5, 1, 0.5, 1)
         love.graphics.setNewFont(18)
         love.graphics.print("Current Turn: " .. self:getPlayerName(self.currentPlayer), 10, 75)
+    end
+end
+
+function Game:drawBlindTrumpCards()
+    -- Only show if player knows the trump or debug mode is on
+    local shouldShow = false
+    if _G.GameOptions and _G.GameOptions.debugMode then
+        shouldShow = true
+    elseif self.trumpKnowers and self.trumpKnowers[1] then
+        shouldShow = true
+    end
+
+    if not shouldShow then return end
+    if not self.blindRevealCards then return end
+
+    -- Draw in bottom right corner
+    local cardW, cardH = 80, 105
+    local startX = 1400
+    local startY = 750
+    local spacing = 90
+
+    -- Label
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.setNewFont(20)
+    love.graphics.print("Trump Cards", startX - 10, startY - 30)
+
+    -- Cutter's card (Rank)
+    local cutterCard = self.blindRevealCards.cutter
+    local cutterSprite = Assets.getCardSprite(cutterCard.suit, cutterCard.rank)
+
+    if cutterSprite then
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(cutterSprite, startX, startY, 0,
+            cardW / cutterSprite:getWidth(), cardH / cutterSprite:getHeight())
+    end
+
+    -- Small label below cutter's card
+    love.graphics.setNewFont(14)
+    love.graphics.setColor(1, 1, 0, 1)
+    love.graphics.print("Rank", startX + 20, startY + cardH + 5)
+
+    -- Dealer's card (Suit)
+    local dealerCard = self.blindRevealCards.dealer
+    local dealerSprite = Assets.getCardSprite(dealerCard.suit, dealerCard.rank)
+
+    if dealerSprite then
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(dealerSprite, startX + spacing, startY, 0,
+            cardW / dealerSprite:getWidth(), cardH / dealerSprite:getHeight())
+    end
+
+    -- Small label below dealer's card
+    love.graphics.setColor(1, 1, 0, 1)
+    love.graphics.print("Suit", startX + spacing + 22, startY + cardH + 5)
+end
+
+function Game:drawBlindReveal()
+    -- Only show if player should see it (cutter, dealer, or debug mode)
+    local shouldShow = false
+    if _G.GameOptions and _G.GameOptions.debugMode then
+        shouldShow = true
+    elseif self.cutter == 1 or self.dealer == 1 then
+        shouldShow = true
+    end
+
+    if not shouldShow then return end
+
+    -- Draw title
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.setNewFont(42)
+    love.graphics.printf("Blind Trump Reveal", 0, 150, DESIGN_WIDTH, "center")
+
+    if not self.blindRevealCards then return end
+
+    -- Draw the two revealed cards in center
+    local cardW, cardH = 110, 150
+    local centerX = 800
+    local centerY = 400
+    local spacing = 140
+
+    -- Cutter's card (Trump Rank)
+    local cutterCardX = centerX - spacing
+    local cutterCardY = centerY
+    local cutterCard = self.blindRevealCards.cutter
+    local cutterSprite = Assets.getCardSprite(cutterCard.suit, cutterCard.rank)
+
+    love.graphics.setNewFont(22)
+    love.graphics.setColor(1, 1, 0, 1)
+    love.graphics.printf(self:getPlayerName(self.cutter) .. " (Trump Rank)",
+        cutterCardX - 50, cutterCardY - 60, 200, "center")
+
+    if cutterSprite then
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(cutterSprite, cutterCardX, cutterCardY, 0,
+            cardW / cutterSprite:getWidth(), cardH / cutterSprite:getHeight())
+    end
+
+    -- Dealer's card (Trump Suit)
+    local dealerCardX = centerX + spacing - cardW
+    local dealerCardY = centerY
+    local dealerCard = self.blindRevealCards.dealer
+    local dealerSprite = Assets.getCardSprite(dealerCard.suit, dealerCard.rank)
+
+    love.graphics.setColor(1, 1, 0, 1)
+    love.graphics.printf(self:getPlayerName(self.dealer) .. " (Trump Suit)",
+        dealerCardX - 50, dealerCardY - 60, 200, "center")
+
+    if dealerSprite then
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(dealerSprite, dealerCardX, dealerCardY, 0,
+            cardW / dealerSprite:getWidth(), cardH / dealerSprite:getHeight())
     end
 end
 
@@ -1182,6 +1376,16 @@ function Game:drawSuitSelection()
 end
 
 function Game:drawCutting()
+    -- Only show if player should see it (cutter or debug mode)
+    local shouldShow = false
+    if _G.GameOptions and _G.GameOptions.debugMode then
+        shouldShow = true
+    elseif self.cutter == 1 then
+        shouldShow = true
+    end
+
+    if not shouldShow then return end
+
     -- Draw instruction text at top
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setNewFont(36)
