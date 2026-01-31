@@ -1,0 +1,169 @@
+-- states/options.lua
+-- Game options/settings state
+
+local Assets = require("lib.assets")
+local Button = require("lib.button")
+local Checkbox = require("lib.checkbox")
+
+local Options = {}
+
+-- Design resolution (same as other states)
+local DESIGN_WIDTH = 1600
+local DESIGN_HEIGHT = 900
+
+-- Get current scale factors
+function Options:getScale()
+    local winW, winH = love.graphics.getDimensions()
+    local scaleX = winW / DESIGN_WIDTH
+    local scaleY = winH / DESIGN_HEIGHT
+    local scale = math.min(scaleX, scaleY)
+    return scale, winW, winH
+end
+
+-- Get offset to center content
+function Options:getOffset()
+    local scale, winW, winH = self:getScale()
+    local scaledWidth = DESIGN_WIDTH * scale
+    local scaledHeight = DESIGN_HEIGHT * scale
+    local offsetX = (winW - scaledWidth) / 2
+    local offsetY = (winH - scaledHeight) / 2
+    return offsetX, offsetY
+end
+
+function Options:load()
+    -- Load background
+    self.background = Assets.getSprite("spr_bg_title")
+
+    -- Initialize game options (these will be read by game state)
+    if not _G.GameOptions then
+        _G.GameOptions = {
+            useCriticals = true -- Default: play with criticals (holy cards)
+        }
+    end
+
+    -- Create checkboxes
+    local centerX = 800
+    local startY = 350
+
+    self.criticalsCheckbox = Checkbox.new(
+        centerX - 200, startY,
+        "Play with Criticals (King♥, 7♣, 7♠ as highest cards)",
+        _G.GameOptions.useCriticals
+    )
+
+    self.checkboxes = {self.criticalsCheckbox}
+
+    -- Create play button
+    self.playButton = Button.new(
+        centerX - 150, startY + 120,
+        300, 60,
+        "Play Game",
+        function()
+            -- Save options
+            _G.GameOptions.useCriticals = self.criticalsCheckbox.checked
+            -- Start game
+            GameState:switch("game")
+        end
+    )
+
+    -- Create back button
+    self.backButton = Button.new(
+        centerX - 150, startY + 200,
+        300, 60,
+        "Back to Menu",
+        function() GameState:switch("menu") end
+    )
+
+    self.buttons = {self.playButton, self.backButton}
+end
+
+function Options:enter()
+    -- Refresh checkbox state from global options
+    if self.criticalsCheckbox then
+        self.criticalsCheckbox.checked = _G.GameOptions.useCriticals
+    end
+end
+
+function Options:update(dt)
+end
+
+function Options:draw()
+    local scale, winW, winH = self:getScale()
+    local offsetX, offsetY = self:getOffset()
+
+    -- Apply scaling transform
+    love.graphics.push()
+    love.graphics.translate(offsetX, offsetY)
+    love.graphics.scale(scale, scale)
+
+    -- Draw background
+    if self.background then
+        love.graphics.setColor(1, 1, 1, 1)
+        local scaleX = DESIGN_WIDTH / self.background:getWidth()
+        local scaleY = DESIGN_HEIGHT / self.background:getHeight()
+        love.graphics.draw(self.background, 0, 0, 0, scaleX, scaleY)
+    else
+        love.graphics.clear(0.1, 0.2, 0.3, 1)
+    end
+
+    -- Draw title
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.setNewFont(48)
+    love.graphics.printf("Game Options", 0, 180, DESIGN_WIDTH, "center")
+
+    -- Draw description
+    love.graphics.setNewFont(20)
+    love.graphics.setColor(0.8, 0.8, 0.8, 1)
+    love.graphics.printf("Choose your preferred rules for Watten", 0, 250, DESIGN_WIDTH, "center")
+
+    -- Draw checkboxes
+    love.graphics.setNewFont(24)
+    for _, checkbox in ipairs(self.checkboxes) do
+        checkbox:draw()
+    end
+
+    -- Draw buttons
+    for _, button in ipairs(self.buttons) do
+        button:draw()
+    end
+
+    love.graphics.pop()
+end
+
+-- Convert screen coordinates to design coordinates
+function Options:screenToDesign(screenX, screenY)
+    local scale, winW, winH = self:getScale()
+    local offsetX, offsetY = self:getOffset()
+    local designX = (screenX - offsetX) / scale
+    local designY = (screenY - offsetY) / scale
+    return designX, designY
+end
+
+function Options:mousemoved(x, y)
+    local dx, dy = self:screenToDesign(x, y)
+    for _, checkbox in ipairs(self.checkboxes) do
+        checkbox:mousemoved(dx, dy)
+    end
+    for _, button in ipairs(self.buttons) do
+        button:mousemoved(dx, dy)
+    end
+end
+
+function Options:mousepressed(x, y, button)
+    local dx, dy = self:screenToDesign(x, y)
+    for _, checkbox in ipairs(self.checkboxes) do
+        checkbox:mousepressed(dx, dy, button)
+    end
+    for _, btn in ipairs(self.buttons) do
+        btn:mousepressed(dx, dy, button)
+    end
+end
+
+function Options:mousereleased(x, y, button)
+    local dx, dy = self:screenToDesign(x, y)
+    for _, btn in ipairs(self.buttons) do
+        btn:mousereleased(dx, dy, button)
+    end
+end
+
+return Options
