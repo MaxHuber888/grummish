@@ -164,8 +164,8 @@ function Game:startNewHand()
     self.handOver = false
     self.handWinner = nil
 
-    -- Start with cutting phase if criticals are enabled, otherwise go straight to dealing
-    if _G.GameOptions and _G.GameOptions.useCriticals then
+    -- Start with cutting phase if both criticals and schleck are enabled
+    if _G.GameOptions and _G.GameOptions.useCriticals and _G.GameOptions.useSchleck then
         self.phase = "cutting" -- New phase: cutting the deck
         self.cutCard = nil -- The card revealed by cutting
         self.cutResult = nil -- Message about the cut result
@@ -408,19 +408,146 @@ end
 -- Card Playing Logic
 function Game:playAICard()
     local hand = self.hands[self.currentPlayer]
-    if #hand > 0 then
-        -- Simple AI: play first valid card
-        for i, card in ipairs(hand) do
-            if self:isCardPlayValid(card, self.currentPlayer) then
-                table.remove(hand, i)
-                self:playCard(card, self.currentPlayer)
-                return
-            end
+    if #hand == 0 then return end
+
+    -- Get valid cards
+    local validCards = {}
+    for i, card in ipairs(hand) do
+        if self:isCardPlayValid(card, self.currentPlayer) then
+            table.insert(validCards, {card = card, index = i})
         end
+    end
+
+    if #validCards == 0 then
         -- Fallback: if no valid card found, play first (shouldn't happen)
         local card = table.remove(hand, 1)
         self:playCard(card, self.currentPlayer)
+        return
     end
+
+    -- Smart AI logic
+    local selectedCard = nil
+
+    if #self.playedCards == 0 then
+        -- First to play: play highest card to try to win
+        selectedCard = self:getHighestCard(validCards)
+    else
+        -- Determine current winning player and card
+        local winningPlayer = self:evaluateTrickSoFar()
+        local teammateIsWinning = self:areTeammates(self.currentPlayer, winningPlayer)
+
+        if teammateIsWinning then
+            -- Teammate is winning: play lowest card (don't waste good cards)
+            selectedCard = self:getLowestCard(validCards)
+        else
+            -- Opponent is winning: try to beat it if possible
+            local winningCards = self:getWinningCards(validCards)
+            if #winningCards > 0 then
+                -- Can beat it: play the lowest winning card (don't waste high cards)
+                selectedCard = self:getLowestCard(winningCards)
+            else
+                -- Can't beat it: throw away lowest card
+                selectedCard = self:getLowestCard(validCards)
+            end
+        end
+    end
+
+    -- Play the selected card
+    if selectedCard then
+        for i, cardInfo in ipairs(hand) do
+            if cardInfo == selectedCard.card then
+                table.remove(hand, i)
+                self:playCard(selectedCard.card, self.currentPlayer)
+                return
+            end
+        end
+        -- If exact match fails, use the stored index
+        table.remove(hand, selectedCard.index)
+        self:playCard(selectedCard.card, self.currentPlayer)
+    end
+end
+
+function Game:areTeammates(player1, player2)
+    -- Team 1: Players 1 and 3
+    -- Team 2: Players 2 and 4
+    return (player1 == 1 or player1 == 3) == (player2 == 1 or player2 == 3)
+end
+
+function Game:evaluateTrickSoFar()
+    -- Find the currently winning player based on cards played so far
+    if #self.playedCards == 0 then return nil end
+
+    local winningPlayer = self.playedCards[1].player
+    local winningCard = self.playedCards[1].card
+    local winningScore = self:getCardScore(winningCard)
+
+    for i = 2, #self.playedCards do
+        local card = self.playedCards[i].card
+        local score = self:getCardScore(card)
+        if score > winningScore then
+            winningScore = score
+            winningCard = card
+            winningPlayer = self.playedCards[i].player
+        end
+    end
+
+    return winningPlayer
+end
+
+function Game:getWinningCards(validCards)
+    -- Return cards that would win the current trick
+    if #self.playedCards == 0 then return validCards end
+
+    local currentWinningScore = 0
+    for _, played in ipairs(self.playedCards) do
+        local score = self:getCardScore(played.card)
+        if score > currentWinningScore then
+            currentWinningScore = score
+        end
+    end
+
+    local winningCards = {}
+    for _, cardInfo in ipairs(validCards) do
+        local score = self:getCardScore(cardInfo.card)
+        if score > currentWinningScore then
+            table.insert(winningCards, cardInfo)
+        end
+    end
+    return winningCards
+end
+
+function Game:getLowestCard(cards)
+    -- Return the card with the lowest score
+    if #cards == 0 then return nil end
+
+    local lowest = cards[1]
+    local lowestScore = self:getCardScore(lowest.card)
+
+    for _, cardInfo in ipairs(cards) do
+        local score = self:getCardScore(cardInfo.card)
+        if score < lowestScore then
+            lowestScore = score
+            lowest = cardInfo
+        end
+    end
+    return lowest
+end
+
+function Game:getHighestCard(cards)
+    -- Return the card with the highest score
+    if #cards == 0 then return nil end
+
+    local highest = cards[1]
+    local highestScore = self:getCardScore(highest.card)
+
+    for _, cardInfo in ipairs(cards) do
+        local score = self:getCardScore(cardInfo.card)
+        if score > highestScore then
+            highestScore = score
+            highest = cardInfo
+        end
+    end
+    return highest
 end
 
 function Game:isCardPlayValid(card, player)

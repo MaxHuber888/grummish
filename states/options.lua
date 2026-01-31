@@ -37,13 +37,14 @@ function Options:load()
     -- Initialize game options (these will be read by game state)
     if not _G.GameOptions then
         _G.GameOptions = {
-            useCriticals = true -- Default: play with criticals (holy cards)
+            useCriticals = true, -- Default: play with criticals (holy cards)
+            useSchleck = true -- Default: play with schleck (cutting)
         }
     end
 
     -- Create checkboxes
     local centerX = 800
-    local startY = 350
+    local startY = 320
 
     self.criticalsCheckbox = Checkbox.new(
         centerX - 200, startY,
@@ -51,16 +52,23 @@ function Options:load()
         _G.GameOptions.useCriticals
     )
 
-    self.checkboxes = {self.criticalsCheckbox}
+    self.schleckCheckbox = Checkbox.new(
+        centerX - 200, startY + 50,
+        "Play with Schleck (Cut deck before dealing)",
+        _G.GameOptions.useSchleck
+    )
+
+    self.checkboxes = {self.criticalsCheckbox, self.schleckCheckbox}
 
     -- Create play button
     self.playButton = Button.new(
-        centerX - 150, startY + 120,
+        centerX - 150, startY + 170,
         300, 60,
         "Play Game",
         function()
             -- Save options
             _G.GameOptions.useCriticals = self.criticalsCheckbox.checked
+            _G.GameOptions.useSchleck = self.schleckCheckbox.checked
             -- Start game
             GameState:switch("game")
         end
@@ -68,7 +76,7 @@ function Options:load()
 
     -- Create back button
     self.backButton = Button.new(
-        centerX - 150, startY + 200,
+        centerX - 150, startY + 250,
         300, 60,
         "Back to Menu",
         function() GameState:switch("menu") end
@@ -81,6 +89,9 @@ function Options:enter()
     -- Refresh checkbox state from global options
     if self.criticalsCheckbox then
         self.criticalsCheckbox.checked = _G.GameOptions.useCriticals
+    end
+    if self.schleckCheckbox then
+        self.schleckCheckbox.checked = _G.GameOptions.useSchleck
     end
 end
 

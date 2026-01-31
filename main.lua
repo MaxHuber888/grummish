@@ -32,7 +32,8 @@ function love.load()
 
     -- Initialize global game options
     _G.GameOptions = {
-        useCriticals = true -- Default: play with criticals (holy cards)
+        useCriticals = true, -- Default: play with criticals (holy cards)
+        useSchleck = true -- Default: play with schleck (cutting)
     }
 
     -- Register game states
