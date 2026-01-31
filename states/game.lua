@@ -4,20 +4,9 @@
 local Deck = require("lib.deck")
 local Assets = require("lib.assets")
 local Button = require("lib.button")
+local Constants = require("lib.constants")
 
 local Game = {}
-
--- Rank names for display
-local RANK_NAMES = {
-    [1] = "Ace", [2] = "2", [3] = "3", [4] = "4", [5] = "5",
-    [6] = "6", [7] = "7", [8] = "8", [9] = "9", [10] = "10",
-    [11] = "Jack", [12] = "Queen", [13] = "King"
-}
-
-local SUIT_NAMES = {
-    clubs = "Clubs", diamonds = "Diamonds",
-    hearts = "Hearts", spades = "Spades"
-}
 
 -- Holy cards helper function
 local function isHolyCard(card)
@@ -26,20 +15,14 @@ local function isHolyCard(card)
         return false
     end
 
-    -- King of Hearts (1st), 7 of Clubs (2nd), 7 of Spades (3rd)
-    if card.rank == 13 and card.suit == "hearts" then
-        return 1 -- King of Hearts
-    elseif card.rank == 7 and card.suit == "clubs" then
-        return 2 -- 7 of Clubs
-    elseif card.rank == 7 and card.suit == "spades" then
-        return 3 -- 7 of Spades
+    -- Check against holy cards definition
+    for _, holyCard in ipairs(Constants.HOLY_CARDS) do
+        if card.rank == holyCard.rank and card.suit == holyCard.suit then
+            return holyCard.level
+        end
     end
     return false
 end
-
--- Design resolution (base for scaling)
-local DESIGN_WIDTH = 1600
-local DESIGN_HEIGHT = 900
 
 function Game:load()
     self.background = Assets.getSprite("spr_bg")
@@ -47,19 +30,22 @@ function Game:load()
     self.particles = {}
 
     -- Create pause menu buttons
-    local centerX = 800
-    local startY = 350
+    local centerX = Constants.PAUSE_MENU_CENTER_X
+    local startY = Constants.PAUSE_MENU_START_Y
+    local btnWidth = Constants.PAUSE_MENU_BUTTON_WIDTH
+    local btnHeight = Constants.PAUSE_MENU_BUTTON_HEIGHT
+    local btnSpacing = Constants.PAUSE_MENU_BUTTON_SPACING
 
     self.pauseResumeButton = Button.new(
-        centerX - 150, startY,
-        300, 60,
+        centerX - btnWidth/2, startY,
+        btnWidth, btnHeight,
         "Resume Game",
         function() self.paused = false end
     )
 
     self.pauseNewGameButton = Button.new(
-        centerX - 150, startY + 80,
-        300, 60,
+        centerX - btnWidth/2, startY + btnSpacing,
+        btnWidth, btnHeight,
         "New Game",
         function()
             self.paused = false
@@ -68,8 +54,8 @@ function Game:load()
     )
 
     self.pauseMenuButton = Button.new(
-        centerX - 150, startY + 160,
-        300, 60,
+        centerX - btnWidth/2, startY + btnSpacing * 2,
+        btnWidth, btnHeight,
         "Main Menu",
         function()
             self.paused = false
@@ -78,8 +64,8 @@ function Game:load()
     )
 
     self.pauseQuitButton = Button.new(
-        centerX - 150, startY + 240,
-        300, 60,
+        centerX - btnWidth/2, startY + btnSpacing * 3,
+        btnWidth, btnHeight,
         "Quit",
         function() love.event.quit() end
     )
@@ -95,8 +81,8 @@ end
 -- Get current scale factors
 function Game:getScale()
     local winW, winH = love.graphics.getDimensions()
-    local scaleX = winW / DESIGN_WIDTH
-    local scaleY = winH / DESIGN_HEIGHT
+    local scaleX = winW / Constants.DESIGN_WIDTH
+    local scaleY = winH / Constants.DESIGN_HEIGHT
     local scale = math.min(scaleX, scaleY) -- Use minimum to maintain aspect ratio
     return scale, winW, winH
 end
@@ -110,8 +96,8 @@ end
 -- Get offset to center content when window is wider/taller than aspect ratio
 function Game:getOffset()
     local scale, winW, winH = self:getScale()
-    local scaledWidth = DESIGN_WIDTH * scale
-    local scaledHeight = DESIGN_HEIGHT * scale
+    local scaledWidth = Constants.DESIGN_WIDTH * scale
+    local scaledHeight = Constants.DESIGN_HEIGHT * scale
     local offsetX = (winW - scaledWidth) / 2
     local offsetY = (winH - scaledHeight) / 2
     return offsetX, offsetY
@@ -183,7 +169,7 @@ function Game:startNewHand()
 
     -- Timers
     self.aiTimer = 0
-    self.aiDelay = 1.5
+    self.aiDelay = Constants.AI_DELAY
     self.phaseTimer = 0
 
     -- UI state
@@ -227,7 +213,7 @@ function Game:update(dt)
         -- Handle cut result display timer
         if self.cutCard then
             self.cutResultTimer = self.cutResultTimer + dt
-            if self.cutResultTimer >= 2.5 then
+            if self.cutResultTimer >= Constants.CUT_RESULT_DISPLAY_TIME then
                 -- Proceed to dealing and selecting rank
                 self:finishCutting()
             end
@@ -245,7 +231,7 @@ function Game:update(dt)
             self:performBlindReveal()
         end
         -- Wait for display timer
-        if self.phaseTimer >= 1.5 then
+        if self.phaseTimer >= Constants.BLIND_REVEAL_TIME then
             self.phase = "playing"
             self.phaseTimer = 0
         end
@@ -278,11 +264,11 @@ function Game:update(dt)
         end
 
         -- Wait for animation to complete before starting next trick
-        if self.phaseTimer >= 2.5 then
+        if self.phaseTimer >= Constants.TRICK_COMPLETE_DISPLAY_TIME then
             self:startNextTrick()
         end
     elseif self.phase == "hand_complete" then
-        if self.phaseTimer >= 3.0 then
+        if self.phaseTimer >= Constants.HAND_COMPLETE_DISPLAY_TIME then
             self:startNewHand()
         end
     elseif self.phase == "playing" then
@@ -313,13 +299,13 @@ function Game:performCut()
         -- Cutter gets to keep the critical card!
         table.remove(self.deck.cards, cutIndex)
         self.cutResult = "Critical! Player " .. self.cutter .. " keeps the " ..
-                        RANK_NAMES[self.cutCard.rank] .. " of " ..
-                        SUIT_NAMES[self.cutCard.suit] .. "!"
+                        Constants.RANK_NAMES[self.cutCard.rank] .. " of " ..
+                        Constants.SUIT_NAMES[self.cutCard.suit] .. "!"
     else
         -- Normal card, just show it and put it back
         self.cutResult = "Player " .. self.cutter .. " cut the " ..
-                        RANK_NAMES[self.cutCard.rank] .. " of " ..
-                        SUIT_NAMES[self.cutCard.suit] .. "."
+                        Constants.RANK_NAMES[self.cutCard.rank] .. " of " ..
+                        Constants.SUIT_NAMES[self.cutCard.suit] .. "."
     end
 
     -- Start timer to show result
@@ -747,22 +733,28 @@ function Game:getCardScore(card)
 
     local holy = isHolyCard(card)
     if holy then
-        -- Holy cards: King♥ (10000), 7♣ (9000), 7♠ (8000)
-        return 10000 - (holy - 1) * 1000
+        -- Holy cards: King♥, 7♣, 7♠ (highest priority)
+        if holy == 1 then
+            return Constants.SCORE_HOLY_1
+        elseif holy == 2 then
+            return Constants.SCORE_HOLY_2
+        else
+            return Constants.SCORE_HOLY_3
+        end
     end
 
     local isTrumpRank = (card.rank == self.trumpRank)
     local isTrumpSuit = (card.suit == self.trumpSuit)
 
     if isTrumpRank and isTrumpSuit then
-        -- Rechte: 5000 (beats all other trumps except holy cards)
-        return 5000
+        -- Rechte (trump rank + trump suit) - second highest priority
+        return Constants.SCORE_RECHTE
     elseif isTrumpRank then
-        -- Trump rank: 3000-3014 (beats trump suit)
-        return 3000 + card.value
+        -- Trump rank only - third priority
+        return Constants.SCORE_TRUMP_RANK + card.value
     elseif isTrumpSuit then
-        -- Trump suit: 1000-1014 (beats all non-trump cards)
-        return 1000 + card.value
+        -- Trump suit only - fourth priority
+        return Constants.SCORE_TRUMP_SUIT + card.value
     else
         -- Regular cards: 7-14
         return card.value
@@ -819,18 +811,11 @@ function Game:startCardAnimations(winningPlayer)
     self.cardAnimations = {}
 
     -- Get winner position (updated for new layout)
-    local winnerPositions = {
-        {800, 660},   -- Bottom
-        {140, 450},   -- Left
-        {800, 120},   -- Top
-        {1460, 450}   -- Right
-    }
+    local winnerPositions = Constants.ANIMATION_TARGET_POSITIONS
     local targetPos = winnerPositions[winningPlayer]
 
     -- Center positions where cards start
-    local startPositions = {
-        {800, 500}, {650, 450}, {800, 400}, {950, 450}
-    }
+    local startPositions = Constants.PLAYED_CARD_POSITIONS
 
     -- Create animation for each played card
     for i, played in ipairs(self.playedCards) do
@@ -853,7 +838,7 @@ end
 function Game:updateCardAnimations(dt)
     if not self.cardAnimations then return end
 
-    local animSpeed = 1.5 -- Animation takes ~0.67 seconds
+    local animSpeed = Constants.ANIMATION_SPEED -- Animation takes ~0.67 seconds
     local allComplete = true
 
     for _, anim in ipairs(self.cardAnimations) do
@@ -897,7 +882,7 @@ function Game:spawnHolyCardParticles()
     -- Player's hand (cards are 110x145)
     for i, card in ipairs(playerHand) do
         if isHolyCard(card) then
-            local cardX = playerX - (#playerHand * 65) + (i - 1) * 130 + 55
+            local cardX = playerX - (#playerHand * Constants.CARD_SPACING) + (i - 1) * Constants.CARD_OVERLAP + 55
             local cardY = playerY + 72
             self:createParticle(cardX, cardY, isHolyCard(card))
         end
@@ -905,9 +890,7 @@ function Game:spawnHolyCardParticles()
 
     -- Played cards (cards are 110x150) - don't spawn during animation
     if not self.cardAnimations or #self.cardAnimations == 0 then
-        local positions = {
-            {800, 500}, {650, 450}, {800, 400}, {950, 450}
-        }
+        local positions = Constants.PLAYED_CARD_POSITIONS
         for _, played in ipairs(self.playedCards) do
             if isHolyCard(played.card) then
                 local pos = positions[played.player]
@@ -922,7 +905,7 @@ function Game:createParticle(x, y, holyLevel)
     local angle = love.math.random() * math.pi * 2
     local speed = 20 + love.math.random() * 30
     local colors = {
-        {1, 0.843, 0}, -- Gold
+        Constants.COLOR_GOLD, -- Gold
         {1, 0.92, 0.2}, -- Light gold
         {1, 1, 0.5}  -- Pale gold
     }
@@ -975,8 +958,8 @@ function Game:draw()
     -- Background
     if self.background then
         love.graphics.setColor(1, 1, 1, 1)
-        local scaleX = DESIGN_WIDTH / self.background:getWidth()
-        local scaleY = DESIGN_HEIGHT / self.background:getHeight()
+        local scaleX = Constants.DESIGN_WIDTH / self.background:getWidth()
+        local scaleY = Constants.DESIGN_HEIGHT / self.background:getHeight()
         love.graphics.draw(self.background, 0, 0, 0, scaleX, scaleY)
     else
         love.graphics.clear(0.1, 0.3, 0.2, 1)
@@ -986,10 +969,14 @@ function Game:draw()
     if self.phase ~= "cutting" then
         -- In debug mode, show all hands face-up
         local debugMode = _G.GameOptions and _G.GameOptions.debugMode
-        self:drawPlayer(1, 800, 750, "You", true, 0)          -- Bottom (human) - moved further down to prevent overlap
-        self:drawPlayer(2, 140, 450, "Left", debugMode, math.pi/2) -- Left - rotated 90°, moved in
-        self:drawPlayer(3, 800, 60, "Top", debugMode, 0)          -- Top - moved further up to prevent overlap
-        self:drawPlayer(4, 1460, 450, "Right", debugMode, -math.pi/2) -- Right - rotated -90°, moved in
+        -- Draw all players using constants for positions, names, and rotations
+        for i = 1, 4 do
+            local pos = Constants.PLAYER_POSITIONS[i]
+            local name = Constants.PLAYER_NAMES[i]
+            local rotation = Constants.PLAYER_ROTATIONS[i]
+            local showCards = (i == 1) or debugMode  -- Only show human player's cards (unless debug mode)
+            self:drawPlayer(i, pos[1], pos[2], name, showCards, rotation)
+        end
     end
 
     -- Draw played cards
@@ -1055,7 +1042,7 @@ function Game:drawPlayer(player, x, y, name, showCards, rotation)
     if player == self.dealer then
         love.graphics.setColor(1, 1, 0, 1)
         love.graphics.setNewFont(16)
-        love.graphics.print("D", -65, -30)
+        love.graphics.print("D", Constants.DEALER_INDICATOR_OFFSET_X, Constants.DEALER_INDICATOR_OFFSET_Y)
     end
 
     -- Player name
@@ -1067,17 +1054,17 @@ function Game:drawPlayer(player, x, y, name, showCards, rotation)
     local cardBack = Assets.getSprite("spr_card_back")
 
     if showCards then
-        -- Player cards: 110x145 (slightly smaller)
-        local cardW, cardH = 110, 145
+        -- Player cards (visible hand)
+        local cardW, cardH = Constants.CARD_WIDTH_PLAYER, Constants.CARD_HEIGHT_PLAYER
         for i, card in ipairs(hand) do
             -- Improved spacing: 130px apart (was 120px)
-            local cardX = -(#hand * 65) + (i - 1) * 130
+            local cardX = -(#hand * Constants.CARD_SPACING) + (i - 1) * Constants.CARD_OVERLAP
             local cardY = 0
 
             -- Add floaty wobble effect for player 1's hand
             if player == 1 then
                 local time = love.timer.getTime()
-                local wobbleSpeed = 1.5 -- How fast the wobble oscillates
+                local wobbleSpeed = Constants.CARD_WOBBLE_SPEED -- How fast the wobble oscillates
                 local wobbleAmplitude = 4 -- How much vertical movement (pixels)
                 local phaseOffset = i * 0.4 -- Each card wobbles at a different phase
                 cardY = cardY + math.sin(time * wobbleSpeed + phaseOffset) * wobbleAmplitude
@@ -1092,7 +1079,7 @@ function Game:drawPlayer(player, x, y, name, showCards, rotation)
 
             -- Draw glow for holy cards
             if isHolyCard(card) then
-                love.graphics.setColor(1, 0.843, 0, 0.3)
+                love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_NORMAL)
                 love.graphics.rectangle("fill", cardX - 4, cardY - 4, cardW + 8, cardH + 8, 10, 10)
             end
 
@@ -1110,8 +1097,8 @@ function Game:drawPlayer(player, x, y, name, showCards, rotation)
             end
         end
     else
-        -- Opponent face-down cards: 65x85
-        local cardW, cardH = 65, 85
+        -- Opponent face-down cards
+        local cardW, cardH = Constants.CARD_WIDTH_OPPONENT, Constants.CARD_HEIGHT_OPPONENT
         for i = 1, #hand do
             -- Improved spacing: 77px apart (proportional to player cards)
             local cardX = -(#hand * 38.5) + (i - 1) * 77
@@ -1132,8 +1119,8 @@ function Game:drawPlayer(player, x, y, name, showCards, rotation)
 end
 
 function Game:drawPlayedCards()
-    -- Bigger cards (110x150)
-    local cardW, cardH = 110, 150
+    -- Center played cards (larger for visibility)
+    local cardW, cardH = Constants.CARD_WIDTH_CENTER, Constants.CARD_HEIGHT_CENTER
 
     -- If animating, draw animated cards
     if self.cardAnimations and #self.cardAnimations > 0 then
@@ -1147,7 +1134,7 @@ function Game:drawPlayedCards()
 
             -- Draw glow for holy cards
             if isHolyCard(anim.card) then
-                love.graphics.setColor(1, 0.843, 0, 0.3 * anim.alpha)
+                love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_NORMAL * anim.alpha)
                 if rotation == 0 then
                     love.graphics.rectangle("fill", anim.x - cardW/2 - 4, anim.y - cardH/2 - 4,
                         cardW + 8, cardH + 8, 8, 8)
@@ -1167,9 +1154,7 @@ function Game:drawPlayedCards()
         end
     else
         -- Normal static display with rotation
-        local positions = {
-            {800, 500}, {650, 450}, {800, 400}, {950, 450}
-        }
+        local positions = Constants.PLAYED_CARD_POSITIONS
 
         for _, played in ipairs(self.playedCards) do
             local pos = positions[played.player]
@@ -1182,7 +1167,7 @@ function Game:drawPlayedCards()
 
             -- Draw glow for holy cards
             if isHolyCard(played.card) then
-                love.graphics.setColor(1, 0.843, 0, 0.3)
+                love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_NORMAL)
                 if rotation == 0 then
                     love.graphics.rectangle("fill", pos[1] - cardW/2 - 4, pos[2] - cardH/2 - 4,
                         cardW + 8, cardH + 8, 8, 8)
@@ -1226,11 +1211,11 @@ function Game:drawHUD()
         if self.trumpRank and self.trumpSuit then
             love.graphics.setColor(1, 1, 0, 1)
             love.graphics.setNewFont(24)
-            love.graphics.print("Trump: " .. RANK_NAMES[self.trumpRank] .. " of " .. SUIT_NAMES[self.trumpSuit], 400, 15)
+            love.graphics.print("Trump: " .. Constants.RANK_NAMES[self.trumpRank] .. " of " .. Constants.SUIT_NAMES[self.trumpSuit], 400, 15)
         elseif self.trumpRank then
             love.graphics.setColor(1, 1, 0, 1)
             love.graphics.setNewFont(24)
-            love.graphics.print("Trump Rank: " .. RANK_NAMES[self.trumpRank], 400, 15)
+            love.graphics.print("Trump Rank: " .. Constants.RANK_NAMES[self.trumpRank], 400, 15)
         end
     end
 
@@ -1309,12 +1294,12 @@ function Game:drawBlindReveal()
     -- Draw title
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setNewFont(42)
-    love.graphics.printf("Blind Trump Reveal", 0, 150, DESIGN_WIDTH, "center")
+    love.graphics.printf("Blind Trump Reveal", 0, 150, Constants.DESIGN_WIDTH, "center")
 
     if not self.blindRevealCards then return end
 
     -- Draw the two revealed cards in center
-    local cardW, cardH = 110, 150
+    local cardW, cardH = Constants.CARD_WIDTH_CENTER, Constants.CARD_HEIGHT_CENTER
     local centerX = 800
     local centerY = 400
     local spacing = 140
@@ -1357,22 +1342,22 @@ function Game:drawRankSelection()
     -- No black overlay - just draw text at top
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setNewFont(36)
-    love.graphics.printf("Click a card to select its RANK as trump", 0, 50, DESIGN_WIDTH, "center")
+    love.graphics.printf("Click a card to select its RANK as trump", 0, 50, Constants.DESIGN_WIDTH, "center")
 
     love.graphics.setNewFont(24)
     love.graphics.setColor(1, 1, 0, 1)
-    love.graphics.printf("(" .. self:getPlayerName(self.rankSelector) .. "'s turn to choose)", 0, 95, DESIGN_WIDTH, "center")
+    love.graphics.printf("(" .. self:getPlayerName(self.rankSelector) .. "'s turn to choose)", 0, 95, Constants.DESIGN_WIDTH, "center")
 end
 
 function Game:drawSuitSelection()
     -- No black overlay - just draw text at top
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setNewFont(36)
-    love.graphics.printf("Click a card to select its SUIT as trump", 0, 50, DESIGN_WIDTH, "center")
+    love.graphics.printf("Click a card to select its SUIT as trump", 0, 50, Constants.DESIGN_WIDTH, "center")
 
     love.graphics.setNewFont(24)
     love.graphics.setColor(1, 1, 0, 1)
-    love.graphics.printf("(" .. self:getPlayerName(self.suitSelector) .. "'s turn to choose)", 0, 95, DESIGN_WIDTH, "center")
+    love.graphics.printf("(" .. self:getPlayerName(self.suitSelector) .. "'s turn to choose)", 0, 95, Constants.DESIGN_WIDTH, "center")
 end
 
 function Game:drawCutting()
@@ -1389,16 +1374,16 @@ function Game:drawCutting()
     -- Draw instruction text at top
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setNewFont(36)
-    love.graphics.printf("Cut the Deck (Schleck)", 0, 50, DESIGN_WIDTH, "center")
+    love.graphics.printf("Cut the Deck (Schleck)", 0, 50, Constants.DESIGN_WIDTH, "center")
 
     love.graphics.setNewFont(24)
     love.graphics.setColor(1, 1, 0, 1)
     local cutterName = self:getPlayerName(self.cutter)
-    love.graphics.printf("(" .. cutterName .. " cuts to look for a Critical)", 0, 95, DESIGN_WIDTH, "center")
+    love.graphics.printf("(" .. cutterName .. " cuts to look for a Critical)", 0, 95, Constants.DESIGN_WIDTH, "center")
 
     -- Draw the deck in center of screen
-    local deckX = 800 - 55 -- Center the 110px wide card
-    local deckY = 400 - 75 -- Center vertically
+    local deckX = Constants.DECK_X -- Center the card
+    local deckY = Constants.DECK_Y -- Center vertically
     local deckW, deckH = 110, 150
 
     if not self.cutCard then
@@ -1423,7 +1408,7 @@ function Game:drawCutting()
 
             love.graphics.setColor(1, 1, 1, 1)
             love.graphics.setNewFont(20)
-            love.graphics.printf("Click to cut", 0, deckY + deckH + 20, DESIGN_WIDTH, "center")
+            love.graphics.printf("Click to cut", 0, deckY + deckH + 20, Constants.DESIGN_WIDTH, "center")
         end
     else
         -- Show the revealed cut card
@@ -1431,7 +1416,7 @@ function Game:drawCutting()
 
         -- Draw glow if it's a critical
         if isHolyCard(self.cutCard) then
-            love.graphics.setColor(1, 0.843, 0, 0.5)
+            love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_BRIGHT)
             love.graphics.rectangle("fill", deckX - 8, deckY - 8, deckW + 16, deckH + 16, 12, 12)
         end
 
@@ -1447,47 +1432,47 @@ function Game:drawCutting()
         -- Show result message
         love.graphics.setNewFont(28)
         if isHolyCard(self.cutCard) then
-            love.graphics.setColor(1, 0.843, 0, 1) -- Gold for critical
+            love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_FULL) -- Gold for critical
         else
             love.graphics.setColor(1, 1, 1, 1)
         end
-        love.graphics.printf(self.cutResult, 0, deckY + deckH + 30, DESIGN_WIDTH, "center")
+        love.graphics.printf(self.cutResult, 0, deckY + deckH + 30, Constants.DESIGN_WIDTH, "center")
     end
 end
 
 function Game:drawHandComplete()
     love.graphics.setColor(0, 0, 0, 0.6)
-    love.graphics.rectangle("fill", 0, 0, DESIGN_WIDTH, DESIGN_HEIGHT)
+    love.graphics.rectangle("fill", 0, 0, Constants.DESIGN_WIDTH, Constants.DESIGN_HEIGHT)
 
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setNewFont(42)
     local msg = self.handWinner == 1 and "You Win the Hand! (+2 points)" or "Opponents Win the Hand! (+2 points)"
-    love.graphics.printf(msg, 0, 400, DESIGN_WIDTH, "center")
+    love.graphics.printf(msg, 0, 400, Constants.DESIGN_WIDTH, "center")
 end
 
 function Game:drawGameOver()
     love.graphics.setColor(0, 0, 0, 0.7)
-    love.graphics.rectangle("fill", 0, 0, DESIGN_WIDTH, DESIGN_HEIGHT)
+    love.graphics.rectangle("fill", 0, 0, Constants.DESIGN_WIDTH, Constants.DESIGN_HEIGHT)
 
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setNewFont(54)
     local message = self.overallWinner == 1 and "You Win the Game!" or "You Lose the Game!"
-    love.graphics.printf(message, 0, 350, DESIGN_WIDTH, "center")
+    love.graphics.printf(message, 0, 350, Constants.DESIGN_WIDTH, "center")
 
     love.graphics.setNewFont(28)
-    love.graphics.printf("Final Score: " .. self.gameScore[1] .. " - " .. self.gameScore[2], 0, 425, DESIGN_WIDTH, "center")
-    love.graphics.printf("Press ESC for menu or SPACE to play again", 0, 470, DESIGN_WIDTH, "center")
+    love.graphics.printf("Final Score: " .. self.gameScore[1] .. " - " .. self.gameScore[2], 0, 425, Constants.DESIGN_WIDTH, "center")
+    love.graphics.printf("Press ESC for menu or SPACE to play again", 0, 470, Constants.DESIGN_WIDTH, "center")
 end
 
 function Game:drawPauseMenu()
     -- Semi-transparent dark overlay
     love.graphics.setColor(0, 0, 0, 0.7)
-    love.graphics.rectangle("fill", 0, 0, DESIGN_WIDTH, DESIGN_HEIGHT)
+    love.graphics.rectangle("fill", 0, 0, Constants.DESIGN_WIDTH, Constants.DESIGN_HEIGHT)
 
     -- Pause title
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setNewFont(54)
-    love.graphics.printf("PAUSED", 0, 250, DESIGN_WIDTH, "center")
+    love.graphics.printf("PAUSED", 0, 250, Constants.DESIGN_WIDTH, "center")
 
     -- Draw buttons
     love.graphics.setNewFont(24)
@@ -1549,8 +1534,8 @@ function Game:mousepressed(x, y, button)
     -- Cutting phase - click the deck to cut
     if self.phase == "cutting" and self.cutter == 1 and not self.cutCard then
         -- Define deck position (center of screen)
-        local deckX = 800 - 55 -- Center the 110px wide card
-        local deckY = 400 - 75 -- Center vertically
+        local deckX = Constants.DECK_X -- Center the card
+        local deckY = Constants.DECK_Y -- Center vertically
         local deckW, deckH = 110, 150
 
         if mx >= deckX and mx <= deckX + deckW and my >= deckY and my <= deckY + deckH then
@@ -1560,14 +1545,15 @@ function Game:mousepressed(x, y, button)
     end
 
     local hand = self.hands[1]
-    local playerX = 800
-    local playerY = 750
-    local cardW, cardH = 110, 145
+    local playerPos = Constants.PLAYER_POSITIONS[1]
+    local playerX = playerPos[1]
+    local playerY = playerPos[2]
+    local cardW, cardH = Constants.CARD_WIDTH_PLAYER, Constants.CARD_HEIGHT_PLAYER
 
     -- Trump rank selection - click a card to choose its rank
     if self.phase == "selecting_rank" and self.rankSelector == 1 then
         for i, card in ipairs(hand) do
-            local cardX = playerX - (#hand * 65) + (i - 1) * 130
+            local cardX = playerX - (#hand * Constants.CARD_SPACING) + (i - 1) * Constants.CARD_OVERLAP
             local cardY = playerY
 
             if mx >= cardX and mx <= cardX + cardW and my >= cardY and my <= cardY + cardH then
@@ -1580,7 +1566,7 @@ function Game:mousepressed(x, y, button)
     -- Trump suit selection - click a card to choose its suit
     if self.phase == "selecting_suit" and self.suitSelector == 1 then
         for i, card in ipairs(hand) do
-            local cardX = playerX - (#hand * 65) + (i - 1) * 130
+            local cardX = playerX - (#hand * Constants.CARD_SPACING) + (i - 1) * Constants.CARD_OVERLAP
             local cardY = playerY
 
             if mx >= cardX and mx <= cardX + cardW and my >= cardY and my <= cardY + cardH then
@@ -1593,7 +1579,7 @@ function Game:mousepressed(x, y, button)
     -- Card playing
     if self.phase == "playing" and self.currentPlayer == 1 and not self.gameOver then
         for i, card in ipairs(hand) do
-            local cardX = playerX - (#hand * 65) + (i - 1) * 130
+            local cardX = playerX - (#hand * Constants.CARD_SPACING) + (i - 1) * Constants.CARD_OVERLAP
             local cardY = playerY
 
             if mx >= cardX and mx <= cardX + cardW and my >= cardY and my <= cardY + cardH then

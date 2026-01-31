@@ -27,7 +27,7 @@ local Game = require("states.game")
 
 function love.load()
     -- Set up window in fullscreen
-    love.window.setTitle("Watten Card Game")
+    love.window.setTitle("Grummish")
     love.window.setFullscreen(true, "desktop")
 
     -- Initialize global game options
