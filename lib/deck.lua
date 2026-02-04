@@ -44,10 +44,6 @@ function Deck:draw()
     return nil
 end
 
-function Deck:count()
-    return #self.cards
-end
-
 -- Deal cards to multiple players
 function Deck:deal(numPlayers, cardsPerPlayer)
     local hands = {}

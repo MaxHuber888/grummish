@@ -5,27 +5,12 @@ local Deck = require("lib.deck")
 local Assets = require("lib.assets")
 local Button = require("lib.button")
 local Constants = require("lib.constants")
+local CardRules = require("lib.card_rules")
 
 local Game = {}
 
--- Holy cards helper function
-local function isHolyCard(card)
-    -- Check if criticals are enabled
-    if not _G.GameOptions or not _G.GameOptions.useCriticals then
-        return false
-    end
-
-    -- Check against holy cards definition
-    for _, holyCard in ipairs(Constants.HOLY_CARDS) do
-        if card.rank == holyCard.rank and card.suit == holyCard.suit then
-            return holyCard.level
-        end
-    end
-    return false
-end
-
 function Game:load()
-    self.background = Assets.getSprite("spr_bg")
+    self.background = Assets.getSprite("bg")
     -- Initialize particle system for holy cards
     self.particles = {}
 
@@ -78,30 +63,6 @@ function Game:load()
     }
 end
 
--- Get current scale factors
-function Game:getScale()
-    local winW, winH = love.graphics.getDimensions()
-    local scaleX = winW / Constants.DESIGN_WIDTH
-    local scaleY = winH / Constants.DESIGN_HEIGHT
-    local scale = math.min(scaleX, scaleY) -- Use minimum to maintain aspect ratio
-    return scale, winW, winH
-end
-
--- Scale a value
-function Game:s(value)
-    local scale = self:getScale()
-    return value * scale
-end
-
--- Get offset to center content when window is wider/taller than aspect ratio
-function Game:getOffset()
-    local scale, winW, winH = self:getScale()
-    local scaledWidth = Constants.DESIGN_WIDTH * scale
-    local scaledHeight = Constants.DESIGN_HEIGHT * scale
-    local offsetX = (winW - scaledWidth) / 2
-    local offsetY = (winH - scaledHeight) / 2
-    return offsetX, offsetY
-end
 
 function Game:enter()
     -- Initialize overall game state
@@ -112,9 +73,9 @@ function Game:enter()
     self.paused = false
 
     -- Stop menu music, start game music
-    local menuMusic = Assets.getSound("snd_main_menu_music")
+    local menuMusic = Assets.getSound("main_menu_music")
     if menuMusic then menuMusic:stop() end
-    local gameMusic = Assets.getSound("snd_game_music")
+    local gameMusic = Assets.getSound("game_music")
     if gameMusic then
         gameMusic:setLooping(true)
         gameMusic:setVolume(0.2)
@@ -132,7 +93,7 @@ function Game:startNewHand()
     -- Initialize deck (shuffle but don't deal yet)
     self.deck = Deck.new()
     self.deck:shuffle()
-    Assets.playSound("snd_card_deck_shuffle", 0.5)
+    Assets.playSound("card_deck_shuffle", 0.5)
 
     -- Trump selection
     self.trumpRank = nil
@@ -150,15 +111,25 @@ function Game:startNewHand()
     self.handOver = false
     self.handWinner = nil
 
+    -- Trick history (for displaying past tricks next to players)
+    self.playerTricks = {
+        [1] = {},
+        [2] = {},
+        [3] = {},
+        [4] = {}
+    }
+
     -- Start with cutting phase if both criticals and schleck are enabled
     if _G.GameOptions and _G.GameOptions.useCriticals and _G.GameOptions.useSchleck then
         self.phase = "cutting" -- New phase: cutting the deck
-        self.cutCard = nil -- The card revealed by cutting
+        self.cutCards = nil -- Cards collected during cutting
         self.cutResult = nil -- Message about the cut result
         self.cutResultTimer = 0
+        self.displayedCutCard = nil -- Will be set after cutting
     else
         -- Skip cutting and deal immediately
         self.hands = self.deck:deal(4, 5)
+        self.displayedCutCard = nil -- No cut card if not cutting
         -- Check if blind mode is enabled
         if _G.GameOptions and _G.GameOptions.useBlind then
             self.phase = "blind_reveal"
@@ -211,7 +182,7 @@ function Game:update(dt)
 
     if self.phase == "cutting" then
         -- Handle cut result display timer
-        if self.cutCard then
+        if self.displayedCutCard then
             self.cutResultTimer = self.cutResultTimer + dt
             if self.cutResultTimer >= Constants.CUT_RESULT_DISPLAY_TIME then
                 -- Proceed to dealing and selecting rank
@@ -285,27 +256,56 @@ end
 
 -- Cutting Logic (Schleck/Lick)
 function Game:performCut()
-    -- Select a random card from the deck as the "cut" card
-    local cutIndex = love.math.random(1, #self.deck.cards)
-    self.cutCard = self.deck.cards[cutIndex]
+    local useCriticals = _G.GameOptions and _G.GameOptions.useCriticals or false
+    self.cutCards = {} -- Cards collected by cutter during cutting
+
+    -- Keep drawing cards until we get a non-critical
+    -- This mimics the real Watten cutting mechanic where consecutive criticals are all kept
+    while #self.deck.cards > 0 do
+        local cutIndex = love.math.random(1, #self.deck.cards)
+        local card = table.remove(self.deck.cards, cutIndex)
+
+        local isCritical = CardRules.isCriticalCard(card, useCriticals)
+
+        if isCritical then
+            -- Cutter keeps this critical and continues drawing
+            table.insert(self.cutCards, card)
+        else
+            -- Non-critical card - this becomes the face-up displayed card
+            self.displayedCutCard = card
+            break
+        end
+    end
 
     -- Play card flip sound
-    Assets.playSound("snd_card_flip_1", 0.5)
+    Assets.playSound("card_flip_1", 0.5)
 
-    -- Check if it's a critical
-    local isCritical = isHolyCard(self.cutCard)
+    -- Build result message based on who is cutting
+    -- Only show critical details if player 1 is cutting or debug mode is on
+    local showDetails = (self.cutter == 1) or (_G.GameOptions and _G.GameOptions.debugMode)
 
-    if isCritical then
-        -- Cutter gets to keep the critical card!
-        table.remove(self.deck.cards, cutIndex)
-        self.cutResult = "Critical! Player " .. self.cutter .. " keeps the " ..
-                        Constants.RANK_NAMES[self.cutCard.rank] .. " of " ..
-                        Constants.SUIT_NAMES[self.cutCard.suit] .. "!"
+    if #self.cutCards > 0 then
+        if showDetails then
+            -- Show which criticals were drawn
+            local criticalNames = {}
+            for _, c in ipairs(self.cutCards) do
+                table.insert(criticalNames, Constants.RANK_NAMES[c.rank] .. " of " .. Constants.SUIT_NAMES[c.suit])
+            end
+            self.cutResult = "Critical" .. (#self.cutCards > 1 and "s" or "") .. "! " ..
+                            self:getPlayerName(self.cutter) .. " keeps: " ..
+                            table.concat(criticalNames, ", ")
+        else
+            -- Other players just see that criticals were drawn, not which ones
+            self.cutResult = self:getPlayerName(self.cutter) .. " drew " ..
+                            #self.cutCards .. " critical" .. (#self.cutCards > 1 and "s" or "") .. "!"
+        end
     else
-        -- Normal card, just show it and put it back
-        self.cutResult = "Player " .. self.cutter .. " cut the " ..
-                        Constants.RANK_NAMES[self.cutCard.rank] .. " of " ..
-                        Constants.SUIT_NAMES[self.cutCard.suit] .. "."
+        -- No criticals - show the card that was cut
+        if self.displayedCutCard then
+            self.cutResult = self:getPlayerName(self.cutter) .. " cut the " ..
+                            Constants.RANK_NAMES[self.displayedCutCard.rank] .. " of " ..
+                            Constants.SUIT_NAMES[self.displayedCutCard.suit] .. "."
+        end
     end
 
     -- Start timer to show result
@@ -313,20 +313,25 @@ function Game:performCut()
 end
 
 function Game:finishCutting()
-    -- If the cutter got a critical, initialize their hand with it
+    -- Initialize all player hands
     self.hands = {}
     for i = 1, 4 do
         self.hands[i] = {}
     end
 
-    -- Add the cut card to cutter's hand if it was a critical
-    if isHolyCard(self.cutCard) then
-        table.insert(self.hands[self.cutter], self.cutCard)
+    -- Give all collected critical cards to the cutter
+    if self.cutCards and #self.cutCards > 0 then
+        for _, card in ipairs(self.cutCards) do
+            table.insert(self.hands[self.cutter], card)
+        end
     end
 
-    -- Deal the remaining cards (5 to each player, or 4 to cutter if they got a critical)
+    -- Deal remaining cards to all players
+    -- Each player gets 5 cards total, minus any criticals already given to cutter
     for player = 1, 4 do
-        local cardsToDeal = (player == self.cutter and isHolyCard(self.cutCard)) and 4 or 5
+        local cardsInHand = #self.hands[player]
+        local cardsToDeal = 5 - cardsInHand
+
         for i = 1, cardsToDeal do
             local card = self.deck:draw()
             if card then
@@ -336,7 +341,7 @@ function Game:finishCutting()
     end
 
     -- Clear cut state
-    self.cutCard = nil
+    self.cutCards = nil
     self.cutResult = nil
     self.cutResultTimer = 0
 
@@ -379,7 +384,7 @@ function Game:performBlindReveal()
     }
 
     -- Play reveal sound
-    Assets.playSound("snd_card_flip_1", 0.5)
+    Assets.playSound("card_flip_1", 0.5)
 end
 
 -- Trump Selection Logic
@@ -410,7 +415,7 @@ function Game:selectRank(rank)
     self.phase = "selecting_suit"
     self.phaseTimer = 0
     self.aiTimer = self.suitSelector ~= 1 and self.aiDelay or 0
-    Assets.playSound("snd_button_press", 0.5)
+    Assets.playSound("button_press", 0.5)
 end
 
 function Game:selectAISuit()
@@ -440,7 +445,7 @@ function Game:selectSuit(suit)
     self.phase = "playing"
     self.phaseTimer = 0
     self.aiTimer = 0
-    Assets.playSound("snd_button_press", 0.5)
+    Assets.playSound("button_press", 0.5)
 end
 
 -- Card Playing Logic
@@ -589,82 +594,21 @@ function Game:getHighestCard(cards)
 end
 
 function Game:isCardPlayValid(card, player)
-    -- Always valid if no cards played yet or it's the first card
-    if #self.playedCards == 0 then
-        return true
-    end
+    local useCriticals = _G.GameOptions and _G.GameOptions.useCriticals or false
+    local useBlind = _G.GameOptions and _G.GameOptions.useBlind or false
 
-    local firstCard = self.playedCards[1].card
-
-    -- Holy cards can always be played
-    if isHolyCard(card) then
-        return true
-    end
-
-    -- If first card is holy, it doesn't belong to any suit - any card can be played
-    if isHolyCard(firstCard) then
-        return true
-    end
-
-    -- If first card is NOT trump suit, any card can be played
-    if firstCard.suit ~= self.trumpSuit then
-        return true
-    end
-
-    -- First card IS trump suit
-    -- In Blind Watten, only cutter and dealer must follow trump suit
-    -- (teammates don't officially know the trump)
-    if _G.GameOptions and _G.GameOptions.useBlind then
-        local isKnower = (player == self.cutter or player == self.dealer)
-        if not isKnower then
-            return true -- Teammates can play any card
-        end
-    end
-
-    -- Must follow suit or beat it (normal mode, or cutter/dealer in blind mode)
-    local hand = self.hands[player]
-
-    -- Check if this card is the highest card in the game (trump rank + trump suit)
-    local isHighestCard = (card.rank == self.trumpRank and card.suit == self.trumpSuit)
-    if isHighestCard then
-        return true -- Highest card can always be played
-    end
-
-    -- Check if player has any trump suit cards (excluding holy cards)
-    local hasTrumpSuit = false
-    for _, c in ipairs(hand) do
-        if c.suit == self.trumpSuit and not isHolyCard(c) then
-            hasTrumpSuit = true
-            break
-        end
-    end
-
-    -- If player has no trump suit, any card is valid
-    if not hasTrumpSuit then
-        return true
-    end
-
-    -- Player has trump suit - must play trump suit or beat the first card
-    if card.suit == self.trumpSuit then
-        return true -- Following suit
-    end
-
-    -- Check if card can beat the first card
-    local cardScore = self:getCardScore(card)
-    local firstCardScore = self:getCardScore(firstCard)
-    if cardScore > firstCardScore then
-        return true -- Can beat it
-    end
-
-    -- Cannot play this card
-    return false
+    return CardRules.isCardPlayValid(
+        card, player, self.hands, self.playedCards,
+        self.trumpRank, self.trumpSuit, useCriticals, useBlind,
+        self.cutter, self.dealer
+    )
 end
 
 function Game:playCard(card, player)
     table.insert(self.playedCards, {card = card, player = player})
 
     local soundVariant = love.math.random(1, 4)
-    Assets.playSound("snd_one_card_placed_" .. soundVariant, 0.4)
+    Assets.playSound("one_card_placed_" .. soundVariant, 0.4)
 
     if #self.playedCards == 4 then
         self:completeTrick()
@@ -681,7 +625,7 @@ function Game:completeTrick()
     local team = (winningPlayer == 1 or winningPlayer == 3) and 1 or 2
     self.tricksWon[team] = self.tricksWon[team] + 1
 
-    Assets.playSound("snd_three_cards_placed", 0.5)
+    Assets.playSound("three_cards_placed", 0.5)
 
     -- Store winning player for later animation
     self.trickWinner = winningPlayer
@@ -724,41 +668,19 @@ function Game:evaluateTrick()
 end
 
 function Game:getCardScore(card)
-    -- Scoring hierarchy (higher = stronger):
-    -- 1. Holy cards (always trump, regardless of selected trump)
-    -- 2. Rechte (trump rank + trump suit together)
-    -- 3. Trump rank cards (any suit with the trump rank)
-    -- 4. Trump suit cards (any card of trump suit that isn't trump rank)
-    -- 5. Regular cards (non-trump)
+    local useCriticals = _G.GameOptions and _G.GameOptions.useCriticals or false
+    local leadSuit = nil
 
-    local holy = isHolyCard(card)
-    if holy then
-        -- Holy cards: King♥, 7♣, 7♠ (highest priority)
-        if holy == 1 then
-            return Constants.SCORE_HOLY_1
-        elseif holy == 2 then
-            return Constants.SCORE_HOLY_2
-        else
-            return Constants.SCORE_HOLY_3
+    -- If there's a first card played, use its suit as the lead suit
+    if self.playedCards and #self.playedCards > 0 then
+        local firstCard = self.playedCards[1].card
+        -- Only set lead suit if first card is not a critical
+        if not CardRules.isCriticalCard(firstCard, useCriticals) then
+            leadSuit = firstCard.suit
         end
     end
 
-    local isTrumpRank = (card.rank == self.trumpRank)
-    local isTrumpSuit = (card.suit == self.trumpSuit)
-
-    if isTrumpRank and isTrumpSuit then
-        -- Rechte (trump rank + trump suit) - second highest priority
-        return Constants.SCORE_RECHTE
-    elseif isTrumpRank then
-        -- Trump rank only - third priority
-        return Constants.SCORE_TRUMP_RANK + card.value
-    elseif isTrumpSuit then
-        -- Trump suit only - fourth priority
-        return Constants.SCORE_TRUMP_SUIT + card.value
-    else
-        -- Regular cards: 7-14
-        return card.value
-    end
+    return CardRules.getCardScore(card, self.trumpRank, self.trumpSuit, useCriticals, leadSuit)
 end
 
 function Game:startNextTrick()
@@ -768,6 +690,19 @@ function Game:startNextTrick()
         self.handShouldEnd = nil
         self:endHand(winningTeam)
         return
+    end
+
+    -- Store the completed trick for display next to the winner
+    if self.trickWinner and #self.playedCards == 4 then
+        -- Copy the played cards before clearing
+        local trickCopy = {}
+        for _, played in ipairs(self.playedCards) do
+            table.insert(trickCopy, {
+                card = played.card,
+                player = played.player
+            })
+        end
+        table.insert(self.playerTricks[self.trickWinner], trickCopy)
     end
 
     -- Continue to next trick
@@ -794,16 +729,16 @@ function Game:endHand(winningTeam)
 
     -- Play hand win sound
     if winningTeam == 1 then
-        Assets.playSound("snd_game_win", 0.4)
+        Assets.playSound("game_win", 0.4)
     else
-        Assets.playSound("snd_game_lose", 0.4)
+        Assets.playSound("game_lose", 0.4)
     end
 end
 
 function Game:endGame(winningTeam)
     self.gameOver = true
     self.overallWinner = winningTeam
-    Assets.playSound(winningTeam == 1 and "snd_game_win" or "snd_game_lose", 0.6)
+    Assets.playSound(winningTeam == 1 and "game_win" or "game_lose", 0.6)
 end
 
 -- Card Animation System
@@ -875,16 +810,18 @@ function Game:spawnHolyCardParticles()
     end
 
     -- Spawn particles around holy cards in player's hand and played cards
+    local useCriticals = _G.GameOptions and _G.GameOptions.useCriticals or false
     local playerHand = self.hands[1]
     local playerX = 800
     local playerY = 750
 
     -- Player's hand (cards are 110x145)
     for i, card in ipairs(playerHand) do
-        if isHolyCard(card) then
+        local isCritical = CardRules.isCriticalCard(card, useCriticals)
+        if isCritical then
             local cardX = playerX - (#playerHand * Constants.CARD_SPACING) + (i - 1) * Constants.CARD_OVERLAP + 55
             local cardY = playerY + 72
-            self:createParticle(cardX, cardY, isHolyCard(card))
+            self:createParticle(cardX, cardY, isCritical)
         end
     end
 
@@ -892,9 +829,10 @@ function Game:spawnHolyCardParticles()
     if not self.cardAnimations or #self.cardAnimations == 0 then
         local positions = Constants.PLAYED_CARD_POSITIONS
         for _, played in ipairs(self.playedCards) do
-            if isHolyCard(played.card) then
+            local isCritical = CardRules.isCriticalCard(played.card, useCriticals)
+            if isCritical then
                 local pos = positions[played.player]
-                self:createParticle(pos[1], pos[2], isHolyCard(played.card))
+                self:createParticle(pos[1], pos[2], isCritical)
             end
         end
     end
@@ -947,8 +885,8 @@ end
 
 -- Drawing Functions
 function Game:draw()
-    local scale, winW, winH = self:getScale()
-    local offsetX, offsetY = self:getOffset()
+    local scale, winW, winH = Constants.getScale()
+    local offsetX, offsetY = Constants.getOffset()
 
     -- Apply scaling transform
     love.graphics.push()
@@ -997,12 +935,23 @@ function Game:draw()
     -- Draw particles
     self:drawParticles()
 
+    -- Draw trick history (completed tricks next to players)
+    self:drawTrickHistory()
+
     -- Draw HUD
     self:drawHUD()
 
     -- Draw blind trump cards in bottom right (if player knows)
     if _G.GameOptions and _G.GameOptions.useBlind and self.blindRevealCards then
         self:drawBlindTrumpCards()
+    end
+
+    -- Draw trump card in top-right (respects blind mode visibility)
+    self:drawTrumpCard()
+
+    -- Draw the displayed cut card (if it exists and we're past cutting phase)
+    if self.displayedCutCard and self.phase ~= "cutting" then
+        self:drawDisplayedCutCard()
     end
 
     -- Draw phase-specific UI
@@ -1051,7 +1000,7 @@ function Game:drawPlayer(player, x, y, name, showCards, rotation)
     love.graphics.printf(name, -50, -30, 100, "center")
 
     local hand = self.hands[player]
-    local cardBack = Assets.getSprite("spr_card_back")
+    local cardBack = Assets.getSprite("card_back")
 
     if showCards then
         -- Player cards (visible hand)
@@ -1073,12 +1022,18 @@ function Game:drawPlayer(player, x, y, name, showCards, rotation)
             local cardSprite = Assets.getCardSprite(card.suit, card.rank)
             local isHovered = self:isCardHovered(x + cardX, y + cardY, cardW, cardH, rotation)
 
-            if self.phase == "playing" and self.currentPlayer == 1 and isHovered then
-                cardY = cardY - 20
+            -- Raise card on hover during playing, rank selection, or suit selection
+            if isHovered and player == 1 then
+                if (self.phase == "playing" and self.currentPlayer == 1) or
+                   (self.phase == "selecting_rank" and self.rankSelector == 1) or
+                   (self.phase == "selecting_suit" and self.suitSelector == 1) then
+                    cardY = cardY - 20
+                end
             end
 
             -- Draw glow for holy cards
-            if isHolyCard(card) then
+            local useCriticals = _G.GameOptions and _G.GameOptions.useCriticals or false
+            if CardRules.isCriticalCard(card, useCriticals) then
                 love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_NORMAL)
                 love.graphics.rectangle("fill", cardX - 4, cardY - 4, cardW + 8, cardH + 8, 10, 10)
             end
@@ -1124,6 +1079,7 @@ function Game:drawPlayedCards()
 
     -- If animating, draw animated cards
     if self.cardAnimations and #self.cardAnimations > 0 then
+        local useCriticals = _G.GameOptions and _G.GameOptions.useCriticals or false
         for _, anim in ipairs(self.cardAnimations) do
             local cardSprite = Assets.getCardSprite(anim.card.suit, anim.card.rank)
 
@@ -1133,7 +1089,7 @@ function Game:drawPlayedCards()
             if anim.player == 4 then rotation = -math.pi / 2 end -- Right: -90 degrees
 
             -- Draw glow for holy cards
-            if isHolyCard(anim.card) then
+            if CardRules.isCriticalCard(anim.card, useCriticals) then
                 love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_NORMAL * anim.alpha)
                 if rotation == 0 then
                     love.graphics.rectangle("fill", anim.x - cardW/2 - 4, anim.y - cardH/2 - 4,
@@ -1154,6 +1110,7 @@ function Game:drawPlayedCards()
         end
     else
         -- Normal static display with rotation
+        local useCriticals = _G.GameOptions and _G.GameOptions.useCriticals or false
         local positions = Constants.PLAYED_CARD_POSITIONS
 
         for _, played in ipairs(self.playedCards) do
@@ -1166,7 +1123,7 @@ function Game:drawPlayedCards()
             if played.player == 4 then rotation = -math.pi / 2 end -- Right: -90 degrees
 
             -- Draw glow for holy cards
-            if isHolyCard(played.card) then
+            if CardRules.isCriticalCard(played.card, useCriticals) then
                 love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_NORMAL)
                 if rotation == 0 then
                     love.graphics.rectangle("fill", pos[1] - cardW/2 - 4, pos[2] - cardH/2 - 4,
@@ -1190,40 +1147,180 @@ end
 
 function Game:drawHUD()
     love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.setNewFont(22)
+    love.graphics.setNewFont(28)
 
-    -- Simplified score display
-    love.graphics.print("You: " .. self.gameScore[1] .. " score | " .. self.tricksWon[1] .. " tricks", 10, 10)
-    love.graphics.print("Opponents: " .. self.gameScore[2] .. " score | " .. self.tricksWon[2] .. " tricks", 10, 40)
-
-    -- Trump info (hide if player doesn't know in blind mode, unless debug mode)
-    local showTrump = true
-    if _G.GameOptions and _G.GameOptions.useBlind and self.trumpKnowers then
-        -- Show if player knows OR debug mode is on
-        if _G.GameOptions.debugMode then
-            showTrump = true
-        else
-            showTrump = self.trumpKnowers[1] == true
-        end
-    end
-
-    if showTrump then
-        if self.trumpRank and self.trumpSuit then
-            love.graphics.setColor(1, 1, 0, 1)
-            love.graphics.setNewFont(24)
-            love.graphics.print("Trump: " .. Constants.RANK_NAMES[self.trumpRank] .. " of " .. Constants.SUIT_NAMES[self.trumpSuit], 400, 15)
-        elseif self.trumpRank then
-            love.graphics.setColor(1, 1, 0, 1)
-            love.graphics.setNewFont(24)
-            love.graphics.print("Trump Rank: " .. Constants.RANK_NAMES[self.trumpRank], 400, 15)
-        end
-    end
+    -- Score display (simplified - tricks shown via trick history)
+    love.graphics.print("You: " .. self.gameScore[1], 10, 10)
+    love.graphics.print("Opponents: " .. self.gameScore[2], 10, 45)
 
     -- Current turn
     if self.phase == "playing" and not self.gameOver then
         love.graphics.setColor(0.5, 1, 0.5, 1)
         love.graphics.setNewFont(18)
-        love.graphics.print("Current Turn: " .. self:getPlayerName(self.currentPlayer), 10, 75)
+        love.graphics.print("Current Turn: " .. self:getPlayerName(self.currentPlayer), 10, 85)
+    end
+end
+
+function Game:drawTrumpCard()
+    -- Check visibility based on blind mode
+    local shouldShow = true
+    if _G.GameOptions and _G.GameOptions.useBlind then
+        -- In blind mode, only show if player is a knower (dealer or cutter)
+        if self.cutter and self.dealer then
+            shouldShow = (self.cutter == 1) or (self.dealer == 1)
+        else
+            shouldShow = false
+        end
+    end
+
+    -- Debug mode overrides
+    if _G.GameOptions and _G.GameOptions.debugMode then
+        shouldShow = true
+    end
+
+    if not shouldShow then return end
+    if not self.trumpRank then return end
+
+    local cardW, cardH = 70, 92
+    local cardX = 1410
+    local cardY = 20
+
+    -- Determine which card to show
+    local suit, rank
+    local isPartialSelection = (self.trumpRank and not self.trumpSuit)
+
+    if isPartialSelection then
+        -- Rank selected but not suit - show as grey spade
+        suit = "spades"
+        rank = self.trumpRank
+    else
+        -- Full trump selected
+        suit = self.trumpSuit
+        rank = self.trumpRank
+    end
+
+    local cardSprite = Assets.getCardSprite(suit, rank)
+
+    -- Label
+    love.graphics.setColor(1, 1, 0, 1)
+    love.graphics.setNewFont(16)
+    love.graphics.print("Trump", cardX - 5, cardY - 20)
+
+    -- Draw card
+    if cardSprite then
+        if isPartialSelection then
+            -- Draw greyed out
+            love.graphics.setColor(0.5, 0.5, 0.5, 1)
+        else
+            love.graphics.setColor(1, 1, 1, 1)
+        end
+        love.graphics.draw(cardSprite, cardX, cardY, 0,
+            cardW / cardSprite:getWidth(), cardH / cardSprite:getHeight())
+
+        -- If partial selection, add white text showing rank
+        if isPartialSelection then
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.setNewFont(32)
+            local rankText = Constants.RANK_NAMES[rank]
+            local font = love.graphics.getFont()
+            local textW = font:getWidth(rankText)
+            local textH = font:getHeight()
+            love.graphics.print(rankText,
+                cardX + cardW/2 - textW/2,
+                cardY + cardH/2 - textH/2)
+        end
+    end
+end
+
+function Game:drawDisplayedCutCard()
+    -- Draw the cut card in the top-right corner
+    local cardW, cardH = 70, 92
+    local cardX = 1500
+    local cardY = 20
+
+    local cardSprite = Assets.getCardSprite(self.displayedCutCard.suit, self.displayedCutCard.rank)
+
+    -- Label
+    love.graphics.setColor(0.8, 0.8, 0.8, 1)
+    love.graphics.setNewFont(16)
+    love.graphics.print("Cut Card", cardX - 10, cardY - 20)
+
+    -- Draw card
+    if cardSprite then
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(cardSprite, cardX, cardY, 0,
+            cardW / cardSprite:getWidth(), cardH / cardSprite:getHeight())
+    else
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.rectangle("fill", cardX, cardY, cardW, cardH, 5, 5)
+    end
+end
+
+function Game:drawTrickHistory()
+    -- Draw completed tricks next to each player in star formation
+    local cardW = Constants.TRICK_CARD_WIDTH
+    local cardH = Constants.TRICK_CARD_HEIGHT
+    local gap = Constants.TRICK_CARD_GAP
+
+    -- Calculate star formation offsets (same as center, but scaled down)
+    -- Half-height and half-width for positioning
+    local halfH = cardH / 2
+    local halfW = cardW / 2
+
+    for player = 1, 4 do
+        local tricks = self.playerTricks[player]
+        if tricks and #tricks > 0 then
+            local basePos = Constants.TRICK_HISTORY_POSITIONS[player]
+            local baseX, baseY = basePos[1], basePos[2]
+
+            -- Draw each completed trick for this player
+            -- Tricks are stacked/overlapped to save space
+            for trickIndex, trick in ipairs(tricks) do
+                -- Offset each trick slightly so you can see multiple tricks
+                local trickOffsetX = (trickIndex - 1) * 15
+                local trickOffsetY = (trickIndex - 1) * 5
+
+                -- Draw the 4 cards in star formation
+                for _, played in ipairs(trick) do
+                    local card = played.card
+                    local cardPlayer = played.player
+                    local cardSprite = Assets.getCardSprite(card.suit, card.rank)
+
+                    -- Position based on which player played this card (star formation)
+                    local cardX, cardY, rotation
+                    if cardPlayer == 1 then
+                        -- Bottom
+                        cardX = baseX + trickOffsetX
+                        cardY = baseY + halfH + gap + trickOffsetY
+                        rotation = 0
+                    elseif cardPlayer == 2 then
+                        -- Left
+                        cardX = baseX - halfH - gap + trickOffsetX
+                        cardY = baseY + trickOffsetY
+                        rotation = math.pi / 2
+                    elseif cardPlayer == 3 then
+                        -- Top
+                        cardX = baseX + trickOffsetX
+                        cardY = baseY - halfH - gap + trickOffsetY
+                        rotation = 0
+                    else
+                        -- Right
+                        cardX = baseX + halfH + gap + trickOffsetX
+                        cardY = baseY + trickOffsetY
+                        rotation = -math.pi / 2
+                    end
+
+                    -- Draw the card (always use center as origin for consistency)
+                    if cardSprite then
+                        love.graphics.setColor(1, 1, 1, 0.9)
+                        local scaleW = cardW / cardSprite:getWidth()
+                        local scaleH = cardH / cardSprite:getHeight()
+                        love.graphics.draw(cardSprite, cardX, cardY, rotation, scaleW, scaleH,
+                            cardSprite:getWidth() / 2, cardSprite:getHeight() / 2)
+                    end
+                end
+            end
+        end
     end
 end
 
@@ -1386,9 +1483,9 @@ function Game:drawCutting()
     local deckY = Constants.DECK_Y -- Center vertically
     local deckW, deckH = 110, 150
 
-    if not self.cutCard then
+    if not self.displayedCutCard then
         -- Show face-down deck (clickable)
-        local cardBack = Assets.getSprite("spr_card_back")
+        local cardBack = Assets.getSprite("card_back")
         if cardBack then
             love.graphics.setColor(1, 1, 1, 1)
             love.graphics.draw(cardBack, deckX, deckY, 0,
@@ -1411,14 +1508,8 @@ function Game:drawCutting()
             love.graphics.printf("Click to cut", 0, deckY + deckH + 20, Constants.DESIGN_WIDTH, "center")
         end
     else
-        -- Show the revealed cut card
-        local cardSprite = Assets.getCardSprite(self.cutCard.suit, self.cutCard.rank)
-
-        -- Draw glow if it's a critical
-        if isHolyCard(self.cutCard) then
-            love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_BRIGHT)
-            love.graphics.rectangle("fill", deckX - 8, deckY - 8, deckW + 16, deckH + 16, 12, 12)
-        end
+        -- Show the revealed displayed cut card (the non-critical that ended the cutting)
+        local cardSprite = Assets.getCardSprite(self.displayedCutCard.suit, self.displayedCutCard.rank)
 
         if cardSprite then
             love.graphics.setColor(1, 1, 1, 1)
@@ -1431,8 +1522,9 @@ function Game:drawCutting()
 
         -- Show result message
         love.graphics.setNewFont(28)
-        if isHolyCard(self.cutCard) then
-            love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_FULL) -- Gold for critical
+        -- Color based on whether criticals were drawn
+        if self.cutCards and #self.cutCards > 0 then
+            love.graphics.setColor(Constants.COLOR_GOLD[1], Constants.COLOR_GOLD[2], Constants.COLOR_GOLD[3], Constants.GOLD_ALPHA_FULL)
         else
             love.graphics.setColor(1, 1, 1, 1)
         end
@@ -1461,7 +1553,7 @@ function Game:drawGameOver()
 
     love.graphics.setNewFont(28)
     love.graphics.printf("Final Score: " .. self.gameScore[1] .. " - " .. self.gameScore[2], 0, 425, Constants.DESIGN_WIDTH, "center")
-    love.graphics.printf("Press ESC for menu or SPACE to play again", 0, 470, Constants.DESIGN_WIDTH, "center")
+    love.graphics.printf("Press M for menu or SPACE to play again", 0, 470, Constants.DESIGN_WIDTH, "center")
 end
 
 function Game:drawPauseMenu()
@@ -1501,8 +1593,8 @@ end
 -- Input Handlers
 function Game:mousemoved(x, y)
     -- Convert screen coordinates to design coordinates
-    local scale, winW, winH = self:getScale()
-    local offsetX, offsetY = self:getOffset()
+    local scale, winW, winH = Constants.getScale()
+    local offsetX, offsetY = Constants.getOffset()
     self.mouseX = (x - offsetX) / scale
     self.mouseY = (y - offsetY) / scale
 
@@ -1518,8 +1610,8 @@ function Game:mousepressed(x, y, button)
     if button ~= 1 then return end
 
     -- Convert screen coordinates to design coordinates
-    local scale, winW, winH = self:getScale()
-    local offsetX, offsetY = self:getOffset()
+    local scale, winW, winH = Constants.getScale()
+    local offsetX, offsetY = Constants.getOffset()
     local mx = (x - offsetX) / scale
     local my = (y - offsetY) / scale
 
@@ -1532,7 +1624,7 @@ function Game:mousepressed(x, y, button)
     end
 
     -- Cutting phase - click the deck to cut
-    if self.phase == "cutting" and self.cutter == 1 and not self.cutCard then
+    if self.phase == "cutting" and self.cutter == 1 and not self.displayedCutCard then
         -- Define deck position (center of screen)
         local deckX = Constants.DECK_X -- Center the card
         local deckY = Constants.DECK_Y -- Center vertically
@@ -1586,7 +1678,7 @@ function Game:mousepressed(x, y, button)
                 -- Validate card play
                 if not self:isCardPlayValid(card, 1) then
                     -- Invalid play - don't allow it, play error sound
-                    Assets.playSound("snd_button_hover", 0.3) -- Use hover sound as "error"
+                    Assets.playSound("button_hover", 0.3) -- Use hover sound as "error"
                     return
                 end
 
@@ -1603,8 +1695,8 @@ function Game:mousereleased(x, y, button)
     if button ~= 1 then return end
 
     -- Convert screen coordinates to design coordinates
-    local scale, winW, winH = self:getScale()
-    local offsetX, offsetY = self:getOffset()
+    local scale, winW, winH = Constants.getScale()
+    local offsetX, offsetY = Constants.getOffset()
     local mx = (x - offsetX) / scale
     local my = (y - offsetY) / scale
 
@@ -1620,9 +1712,14 @@ end
 function Game:keypressed(key)
     if key == "escape" then
         if not self.gameOver then
+            -- Toggle pause during gameplay
             self.paused = not self.paused
         end
+    elseif key == "m" and self.gameOver then
+        -- Return to menu when game is over
+        GameState:switch("menu")
     elseif key == "space" and self.gameOver then
+        -- Restart game
         self:enter()
     end
 end

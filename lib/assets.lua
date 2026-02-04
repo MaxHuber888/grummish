@@ -6,39 +6,28 @@ local Assets = {
     sounds = {}
 }
 
--- Helper function to find PNG in sprite directory
-local function findPNG(path)
-    local items = love.filesystem.getDirectoryItems(path)
-    for _, item in ipairs(items) do
-        local fullPath = path .. "/" .. item
-        local info = love.filesystem.getInfo(fullPath)
-        if info and info.type == "file" and item:match("%.png$") then
-            return fullPath
-        elseif info and info.type == "directory" then
-            local found = findPNG(fullPath)
-            if found then return found end
+-- Load a sprite from the images directory
+-- Searches multiple category directories: cards, backgrounds, ui, effects
+function Assets.loadSprite(name)
+    local categories = {"cards", "backgrounds", "ui", "effects"}
+    for _, category in ipairs(categories) do
+        local path = "images/" .. category .. "/" .. name .. ".png"
+        if love.filesystem.getInfo(path) then
+            Assets.sprites[name] = love.graphics.newImage(path)
+            return Assets.sprites[name]
         end
     end
     return nil
 end
 
--- Load a sprite from the sprites directory
-function Assets.loadSprite(name)
-    local path = "sprites/" .. name
-    local pngPath = findPNG(path)
-    if pngPath then
-        Assets.sprites[name] = love.graphics.newImage(pngPath)
-        return Assets.sprites[name]
-    end
-    return nil
-end
-
 -- Load a sound from the sounds directory
+-- Sounds are now in flat structure: sounds/name.mp3
+-- Music files use "stream" type, sound effects use "static"
 function Assets.loadSound(name)
-    local path = "sounds/" .. name
-    local mp3Path = path .. "/" .. name .. ".mp3"
-    if love.filesystem.getInfo(mp3Path) then
-        Assets.sounds[name] = love.audio.newSource(mp3Path, "static")
+    local path = "sounds/" .. name .. ".mp3"
+    if love.filesystem.getInfo(path) then
+        local soundType = (name:match("music") or name:match("theme")) and "stream" or "static"
+        Assets.sounds[name] = love.audio.newSource(path, soundType)
         return Assets.sounds[name]
     end
     return nil
@@ -71,7 +60,7 @@ end
 
 -- Load card sprite based on suit and rank
 function Assets.getCardSprite(suit, rank)
-    local spriteName = "spr_" .. suit .. "_" .. rank
+    local spriteName = suit .. "_" .. rank
     return Assets.getSprite(spriteName)
 end
 

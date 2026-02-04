@@ -32,14 +32,14 @@ function Button:mousemoved(x, y)
 
     -- Play hover sound on first hover
     if self.hovered and not wasHovered then
-        Assets.playSound("snd_button_hover", 0.3)
+        Assets.playSound("button_hover", 0.3)
     end
 end
 
 function Button:mousepressed(x, y, button)
     if button == 1 and self:contains(x, y) then
         self.pressed = true
-        Assets.playSound("snd_button_press", 0.5)
+        Assets.playSound("button_press", 0.5)
     end
 end
 

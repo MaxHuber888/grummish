@@ -31,14 +31,14 @@ function Checkbox:mousemoved(mx, my)
 
     -- Play hover sound when starting to hover
     if self.hovered and not wasHovered then
-        Assets.playSound("snd_button_hover", 0.3)
+        Assets.playSound("button_hover", 0.3)
     end
 end
 
 function Checkbox:mousepressed(mx, my, button)
     if button == 1 and self:isInside(mx, my) then
         self.checked = not self.checked
-        Assets.playSound("snd_button_press", 0.4)
+        Assets.playSound("button_press", 0.4)
     end
 end
 

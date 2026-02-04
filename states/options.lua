@@ -4,35 +4,13 @@
 local Assets = require("lib.assets")
 local Button = require("lib.button")
 local Checkbox = require("lib.checkbox")
+local Constants = require("lib.constants")
 
 local Options = {}
 
--- Design resolution (same as other states)
-local DESIGN_WIDTH = 1600
-local DESIGN_HEIGHT = 900
-
--- Get current scale factors
-function Options:getScale()
-    local winW, winH = love.graphics.getDimensions()
-    local scaleX = winW / DESIGN_WIDTH
-    local scaleY = winH / DESIGN_HEIGHT
-    local scale = math.min(scaleX, scaleY)
-    return scale, winW, winH
-end
-
--- Get offset to center content
-function Options:getOffset()
-    local scale, winW, winH = self:getScale()
-    local scaledWidth = DESIGN_WIDTH * scale
-    local scaledHeight = DESIGN_HEIGHT * scale
-    local offsetX = (winW - scaledWidth) / 2
-    local offsetY = (winH - scaledHeight) / 2
-    return offsetX, offsetY
-end
-
 function Options:load()
     -- Load background
-    self.background = Assets.getSprite("spr_bg_title")
+    self.background = Assets.getSprite("bg_title")
 
     -- Initialize game options (these will be read by game state)
     if not _G.GameOptions then
@@ -121,8 +99,8 @@ function Options:update(dt)
 end
 
 function Options:draw()
-    local scale, winW, winH = self:getScale()
-    local offsetX, offsetY = self:getOffset()
+    local scale, winW, winH = Constants.getScale()
+    local offsetX, offsetY = Constants.getOffset()
 
     -- Apply scaling transform
     love.graphics.push()
@@ -132,8 +110,8 @@ function Options:draw()
     -- Draw background
     if self.background then
         love.graphics.setColor(1, 1, 1, 1)
-        local scaleX = DESIGN_WIDTH / self.background:getWidth()
-        local scaleY = DESIGN_HEIGHT / self.background:getHeight()
+        local scaleX = Constants.DESIGN_WIDTH / self.background:getWidth()
+        local scaleY = Constants.DESIGN_HEIGHT / self.background:getHeight()
         love.graphics.draw(self.background, 0, 0, 0, scaleX, scaleY)
     else
         love.graphics.clear(0.1, 0.2, 0.3, 1)
@@ -142,12 +120,12 @@ function Options:draw()
     -- Draw title
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.setNewFont(48)
-    love.graphics.printf("Game Options", 0, 180, DESIGN_WIDTH, "center")
+    love.graphics.printf("Game Options", 0, 180, Constants.DESIGN_WIDTH, "center")
 
     -- Draw description
     love.graphics.setNewFont(20)
     love.graphics.setColor(0.8, 0.8, 0.8, 1)
-    love.graphics.printf("Choose your preferred rules for Watten", 0, 250, DESIGN_WIDTH, "center")
+    love.graphics.printf("Choose your preferred rules for Watten", 0, 250, Constants.DESIGN_WIDTH, "center")
 
     -- Draw checkboxes
     love.graphics.setNewFont(24)
@@ -163,17 +141,8 @@ function Options:draw()
     love.graphics.pop()
 end
 
--- Convert screen coordinates to design coordinates
-function Options:screenToDesign(screenX, screenY)
-    local scale, winW, winH = self:getScale()
-    local offsetX, offsetY = self:getOffset()
-    local designX = (screenX - offsetX) / scale
-    local designY = (screenY - offsetY) / scale
-    return designX, designY
-end
-
 function Options:mousemoved(x, y)
-    local dx, dy = self:screenToDesign(x, y)
+    local dx, dy = Constants.screenToDesign(x, y)
     for _, checkbox in ipairs(self.checkboxes) do
         checkbox:mousemoved(dx, dy)
     end
@@ -183,7 +152,7 @@ function Options:mousemoved(x, y)
 end
 
 function Options:mousepressed(x, y, button)
-    local dx, dy = self:screenToDesign(x, y)
+    local dx, dy = Constants.screenToDesign(x, y)
     for _, checkbox in ipairs(self.checkboxes) do
         checkbox:mousepressed(dx, dy, button)
     end
@@ -193,7 +162,7 @@ function Options:mousepressed(x, y, button)
 end
 
 function Options:mousereleased(x, y, button)
-    local dx, dy = self:screenToDesign(x, y)
+    local dx, dy = Constants.screenToDesign(x, y)
     for _, btn in ipairs(self.buttons) do
         btn:mousereleased(dx, dy, button)
     end
